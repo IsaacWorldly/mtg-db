@@ -24,9 +24,13 @@ import time
 import sqlite3
 import argparse
 import requests
+import cloudscraper
 
 DB_PATH = "mtg.db"
 HEADERS = {"User-Agent": "Mozilla/5.0 (personal MTG research project)"}
+
+# Cloudscraper session handles Cloudflare JS challenges (required for Moxfield)
+_scraper = cloudscraper.create_scraper()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -38,12 +42,45 @@ def get_db():
 
 
 def ensure_tables(conn):
-    """Create decks / deck_cards tables if they don't exist yet."""
-    with open("create_decks_tables.sql", "r") as f:
-        sql = f.read()
-    # The SQL file uses DROP TABLE … so only run CREATE portions when tables exist.
-    # Safe to run in full on a fresh DB; on existing DB the DROP/CREATE is idempotent.
-    conn.executescript(sql)
+    """Create decks / deck_cards tables if they don't exist yet.
+    Uses IF NOT EXISTS — safe to call on a populated DB without wiping data.
+    To reset tables entirely, run create_decks_tables.sql manually.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS decks (
+            deck_id         TEXT PRIMARY KEY,
+            source          TEXT NOT NULL,
+            source_id       TEXT NOT NULL,
+            source_url      TEXT,
+            name            TEXT,
+            format          TEXT,
+            player          TEXT,
+            description     TEXT,
+            created_at      TEXT,
+            updated_at      TEXT,
+            view_count      INTEGER,
+            like_count      INTEGER,
+            raw_json        TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_decks_player ON decks(player);
+        CREATE INDEX IF NOT EXISTS idx_decks_format ON decks(format);
+        CREATE INDEX IF NOT EXISTS idx_decks_source ON decks(source);
+
+        CREATE TABLE IF NOT EXISTS deck_cards (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id     TEXT    NOT NULL,
+            card_id     TEXT,
+            card_name   TEXT    NOT NULL,
+            quantity    INTEGER NOT NULL DEFAULT 1,
+            board       TEXT    NOT NULL DEFAULT 'main',
+            FOREIGN KEY (deck_id) REFERENCES decks(deck_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_deck_cards_deck_id ON deck_cards(deck_id);
+        CREATE INDEX IF NOT EXISTS idx_deck_cards_card_id ON deck_cards(card_id);
+        CREATE INDEX IF NOT EXISTS idx_deck_cards_board    ON deck_cards(board);
+    """)
     conn.commit()
 
 
@@ -115,7 +152,7 @@ MOXFIELD_BOARD_MAP = {
 
 def fetch_moxfield(source_id: str, source_url: str) -> tuple[dict, list[dict]]:
     api_url = f"https://api2.moxfield.com/v2/decks/all/{source_id}"
-    r = requests.get(api_url, headers=HEADERS, timeout=15)
+    r = _scraper.get(api_url, timeout=15)
     r.raise_for_status()
     data = r.json()
 
@@ -265,7 +302,16 @@ def ingest_deck(url: str, conn=None) -> str:
         ensure_tables(conn)
 
     source, source_id = detect_source(url)
-    print(f"[{source}] Fetching deck {source_id} …")
+    deck_id = f"{source}_{source_id}"
+
+    existing = conn.execute(
+        "SELECT name, updated_at FROM decks WHERE deck_id = ?", (deck_id,)
+    ).fetchone()
+
+    if existing:
+        print(f"[{source}] Deck already exists: '{existing['name']}' (last updated {existing['updated_at']}) — replacing …")
+    else:
+        print(f"[{source}] New deck {source_id} — fetching …")
 
     fetcher = SOURCE_FETCHERS[source]
     deck, cards = fetcher(source_id, url)
@@ -274,7 +320,8 @@ def ingest_deck(url: str, conn=None) -> str:
     upsert_deck_cards(conn, deck["deck_id"], cards)
     conn.commit()
 
-    print(f"[{source}] Saved '{deck['name']}' ({len(cards)} card entries) → {deck['deck_id']}")
+    action = "Updated" if existing else "Saved"
+    print(f"[{source}] {action} '{deck['name']}' ({len(cards)} card entries) → {deck['deck_id']}")
 
     if close_conn:
         conn.close()

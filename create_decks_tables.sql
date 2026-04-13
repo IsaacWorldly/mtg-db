@@ -1,6 +1,11 @@
 -- ============================================================
 -- Decks & Deck Cards Tables
 -- Supports multi-source ingestion: Moxfield, MTGGoldfish, 17lands
+--
+-- WARNING: This file drops and recreates both tables.
+-- Use for initial setup or deliberate schema resets only.
+-- deck_ingest.py uses CREATE TABLE IF NOT EXISTS and will NOT
+-- wipe existing data on normal runs.
 -- ============================================================
 
 DROP TABLE IF EXISTS deck_cards;

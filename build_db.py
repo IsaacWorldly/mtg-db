@@ -87,5 +87,12 @@ else:
 
 conn.close()
 
+# Ensure decks + deck_cards tables exist (CREATE IF NOT EXISTS — preserves existing data)
+print("Ensuring deck tables exist...")
+from deck_ingest import ensure_tables, get_db
+deck_conn = get_db()
+ensure_tables(deck_conn)
+deck_conn.close()
+
 print(f"Database saved to {DB_PATH}")
 print("Database build complete!")
