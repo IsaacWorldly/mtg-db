@@ -89,13 +89,16 @@ See the [🛠️ DB Browser Guide](#-db-browser-for-sqlite-guide) section below 
 ```
 mtg-db/
 ├── streamlit_app.py          # Main Streamlit web application
-├── build_db.py              # Database builder with dual-table structure
-├── create_cards_table.sql   # SQL schema for structured cards table
-├── query_cards.py           # Example query script
-├── moxfield_pull.py         # Moxfield deck data fetcher
-├── requirements.txt         # Python dependencies
-├── mtg.db                   # SQLite database (created after build)
-├── README.md               # This file
+├── build_db.py               # Database builder (Scryfall bulk data → cards_raw + cards)
+├── create_cards_table.sql    # SQL schema for structured cards table
+├── create_decks_tables.sql   # SQL schema for decks + deck_cards tables
+├── deck_ingest.py            # Ingest a deck from a URL (Moxfield, MTGGoldfish, 17lands stub)
+├── export_neo4j_csvs.py      # Export all tables to Neo4j-ready CSVs
+├── moxfield_pull.py          # Legacy: bulk-fetch all decks for a list of Moxfield usernames
+├── query_cards.py            # Example query script
+├── requirements.txt          # Python dependencies
+├── mtg.db                    # SQLite database (created after build)
+├── README.md                 # This file
 └── DB_BROWSER_QUICK_START.md # Quick reference for DB Browser for SQLite
 ```
 
@@ -109,6 +112,8 @@ mtg-db/
   - Pricing (USD, EUR, TIX)
   - Legality (Standard, Modern, Commander)
   - Set information and metadata
+- **`decks`**: One row per deck ingested via `deck_ingest.py`; captures source platform, format, player, and metadata
+- **`deck_cards`**: Junction table linking decks to cards with `quantity` and `board` (main / side / commander / companion)
 
 ## 🌐 Web Interface Tabs
 
@@ -170,6 +175,33 @@ WHERE released_at >= '2024-01-01'
 ORDER BY released_at DESC
 LIMIT 10;
 ```
+
+## 🃏 Deck Ingestion
+
+Ingest a deck from a URL — source is auto-detected:
+
+```bash
+# Single deck
+python deck_ingest.py https://www.moxfield.com/decks/abc123
+
+# Multiple decks / mixed sources
+python deck_ingest.py https://www.moxfield.com/decks/abc123 https://www.mtggoldfish.com/deck/6780040
+```
+
+Supported sources:
+- **Moxfield** — full metadata + Scryfall card IDs included in API response
+- **MTGGoldfish** — parses plaintext download; Scryfall IDs resolved by name lookup
+- **17lands** — stub only (API not publicly documented)
+
+## 📤 Neo4j CSV Export
+
+Export all nodes and relationships as CSVs for use with Neo4j `LOAD CSV`:
+
+```bash
+python export_neo4j_csvs.py --out-dir ./neo4j_export
+```
+
+Outputs node files (`nodes_cards.csv`, `nodes_decks.csv`, etc.) and relationship files (`rels_deck_contains.csv`, etc.), plus ready-to-paste Cypher `LOAD CSV` statements.
 
 ## 🛠️ Advanced Features
 
