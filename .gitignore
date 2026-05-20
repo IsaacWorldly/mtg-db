@@ -4,3 +4,4 @@ __pycache__/
 *.db
 mtg.db-wal
 mtg.db-shm
+.DS_Store
